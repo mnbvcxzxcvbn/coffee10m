@@ -281,15 +281,20 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
     if (mag < 0.4 * G) extraSpill += (0.4 - mag / G) * 1.5 * dtm;
   }
 
+  // Never waits forever: some browsers leave requestPermission() pending, so whether
+  // sensor values actually arrive during the countdown decides in the end.
   async function enableSensors() {
     if (!window.isSecureContext || typeof DeviceMotionEvent === "undefined") return false;
-    try {
-      if (typeof DeviceMotionEvent.requestPermission === "function") {
-        const r = await DeviceMotionEvent.requestPermission();
-        if (r !== "granted") return false;
-      }
-    } catch { return false; }
-    window.addEventListener("devicemotion", onMotion);
+    window.addEventListener("devicemotion", onMotion);      // Android sends values without asking
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+      try {
+        const r = await Promise.race([
+          DeviceMotionEvent.requestPermission(),             // iOS: must be called inside the tap
+          new Promise(res => setTimeout(() => res("timeout"), 4000)),
+        ]);
+        if (r === "denied") return false;
+      } catch { /* refused to ask: the incoming values decide */ }
+    }
     return true;
   }
 
@@ -302,7 +307,10 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
 
   $("btnStart").addEventListener("click", async () => {
     S.lv = +pick("lv"); S.stride = +pick("st");
+    const btn = $("btnStart"), label = btn.textContent;
+    btn.textContent = "センサーを準備しています…"; btn.disabled = true;
     const ok = await enableSensors();
+    btn.textContent = label; btn.disabled = false;
     keepAwake();
     $("ovTitle").hidden = true;
     resetRun();

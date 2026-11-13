@@ -226,23 +226,34 @@ td:first-child{font-family:var(--body)}
     if (now - lastHist > 100) { lastHist = now; hist.push({ t: (now - M.t0) / 1000, vi: M.vf, vs: M.stepSpeed }); }
   }
 
+  // Returns "ok" | "denied" | "unsupported". Never waits forever: some browsers leave
+  // requestPermission() pending, so whether sensor values actually arrive decides in the end.
   async function enableSensors() {
-    if (!window.isSecureContext || typeof DeviceMotionEvent === "undefined") return false;
-    try {
-      if (typeof DeviceMotionEvent.requestPermission === "function") {
-        if (await DeviceMotionEvent.requestPermission() !== "granted") return false;
-      }
-    } catch { return false; }
-    window.addEventListener("devicemotion", onMotion);
-    return true;
+    if (!window.isSecureContext || typeof DeviceMotionEvent === "undefined") return "unsupported";
+    window.addEventListener("devicemotion", onMotion);      // Android sends values without asking
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+      try {
+        const r = await Promise.race([
+          DeviceMotionEvent.requestPermission(),             // iOS: must be called inside the tap
+          new Promise(res => setTimeout(() => res("timeout"), 4000)),
+        ]);
+        if (r === "denied") return "denied";
+      } catch { /* refused to ask: fall through, the incoming values decide */ }
+    }
+    return "ok";
   }
 
   // ---- controls ----
   let sensorsOn = false;
   $("btnStart").addEventListener("click", async () => {
     if (!sensorsOn) {
-      sensorsOn = await enableSensors();
-      if (!sensorsOn) { $("status").textContent = "センサーを使えません。HTTPSで開いたスマホで、モーションへのアクセスを許可してください。"; return; }
+      $("status").textContent = "センサーを準備しています…";
+      $("btnStart").disabled = true;
+      const res = await enableSensors();
+      $("btnStart").disabled = false;
+      if (res === "unsupported") { $("status").textContent = "このブラウザではモーションセンサーを使えません。スマホのSafariかChromeで開いてください。"; return; }
+      if (res === "denied") { $("status").textContent = "モーションへのアクセスが拒否されました。iPhoneはSafariのタブを閉じて開き直すと、もう一度聞かれます。"; return; }
+      sensorsOn = true;
       navigator.wakeLock?.request("screen").catch(() => {});   // don't wait: it can take seconds or never settle
     }
     Object.assign(M, { vf: 0, vr: 0, xf: 0, steps: 0, stepSpeed: 0, stepInt: 0, lastStep: 0 });
@@ -252,7 +263,7 @@ td:first-child{font-family:var(--body)}
     $("status").textContent = "静止して測っています…（2秒）";
     $("btnStart").disabled = true;
     setTimeout(() => {
-      if (calib.length < 10) { phase = "idle"; $("btnStart").disabled = false; $("status").textContent = "センサーの値が届きません。この端末では計測できないようです。"; return; }
+      if (calib.length < 10) { phase = "idle"; sensorsOn = false; $("btnStart").disabled = false; $("status").textContent = "センサーの値が届きません。モーションへのアクセスを許可してから、もう一度「計測スタート」を押してください。"; return; }
       const tail = calib.slice(Math.floor(calib.length / 3));   // skip the moment of the tap
       bias = { f: tail.reduce((s, c) => s + c.f, 0) / tail.length, r: tail.reduce((s, c) => s + c.r, 0) / tail.length };
       M.t0 = performance.now(); phase = "run";
