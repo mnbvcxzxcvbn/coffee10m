@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>コーヒー10m</title>
+<meta name="description" content="スマホをトレイにして、本物の揺れと歩みでコーヒーを10m運ぶゲーム。こぼさず届けられる？">
+<meta property="og:title" content="コーヒー10m">
+<meta property="og:description" content="スマホをトレイにして、コーヒーをこぼさず10m運べるか？">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="コーヒー10m">
+<meta name="twitter:description" content="スマホをトレイにして、コーヒーをこぼさず10m運べるか？">
+<meta name="theme-color" content="#1b110c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&family=DM+Mono:wght@500&display=swap">
+<style>
+/* Layout: one-screen app — HUD strip on top, the mug on canvas in the middle, controls at the bottom. Single dark "espresso bar" look by choice. */
+:root{
+  --roast:#1b110c;      /* page ground: dark roast */
+  --bean:#2c1d15;       /* panels */
+  --crema:#e3b878;      /* accent: crema gold */
+  --milk:#f6eee3;       /* text */
+  --steam:#a8968a;      /* muted text */
+  --cherry:#e2404f;     /* danger: coffee cherry */
+  --leaf:#7fbf8e;       /* success */
+  --display:"Dela Gothic One","Hiragino Sans","Yu Gothic",sans-serif;
+  --body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+  --mono:"DM Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--roast);color:var(--milk);font-family:var(--body);font-size:15px;
+  overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+[hidden]{display:none!important}
+#app{height:100%;display:flex;flex-direction:column;max-width:520px;margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px}
+
+/* HUD */
+.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.stat{background:var(--bean);border-radius:10px;padding:8px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.stat .k{font-size:11px;letter-spacing:.08em;color:var(--steam)}
+.stat .v{font-family:var(--mono);font-size:18px;font-variant-numeric:tabular-nums;color:var(--milk);white-space:nowrap}
+.stat .v small{font-size:10px;color:var(--steam);margin-left:2px}
+.track{margin-top:10px;position:relative;height:28px}
+.track .rail{position:absolute;left:0;right:0;top:12px;height:4px;border-radius:2px;
+  background:repeating-linear-gradient(90deg,var(--bean) 0 calc(10% - 2px),#4a3528 calc(10% - 2px) 10%)}
+.track .fill{position:absolute;left:0;top:12px;height:4px;border-radius:2px;background:var(--crema);width:0%}
+.track .me{position:absolute;top:0;transform:translateX(-50%);font-size:18px;line-height:1;left:0%}
+.track .goal{position:absolute;right:-4px;top:2px;font-family:var(--mono);font-size:11px;color:var(--crema)}
+
+/* stage */
+.stage{flex:1;min-height:0;position:relative}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.banner{position:absolute;left:0;right:0;top:8px;text-align:center;font-family:var(--display);font-size:22px;color:var(--cherry);
+  opacity:0;transition:opacity .15s}
+.banner.on{opacity:1}
+.note{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:12px;color:var(--steam)}
+
+/* overlays */
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:16px;
+  background:color-mix(in srgb,var(--roast) 88%,transparent);
+  padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px));padding-block:24px;
+  overflow-y:auto}
+.overlay>.inner{max-width:440px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:16px}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(34px,11vw,60px);line-height:1;margin:0;color:var(--milk);white-space:nowrap}
+h1 em{font-style:normal;color:var(--crema)}
+h2{font-family:var(--display);font-weight:400;font-size:30px;margin:0;line-height:1.15;text-wrap:balance}
+.lead{margin:0;line-height:1.75;color:var(--milk)}
+.howto{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.howto li{display:grid;grid-template-columns:28px 1fr;gap:8px;line-height:1.6;color:var(--steam)}
+.howto b{font-family:var(--mono);color:var(--crema);font-weight:500}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>span{font-size:11px;letter-spacing:.1em;color:var(--steam)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{background:var(--bean);border:1.5px solid transparent;border-radius:10px;padding:9px 6px;text-align:center;cursor:pointer;
+  display:flex;flex-direction:column;gap:2px;font-weight:700}
+.seg label small{font-weight:400;font-size:11px;color:var(--steam);font-family:var(--mono)}
+.seg input:checked+label{border-color:var(--crema);color:var(--crema)}
+.seg input:focus-visible+label{outline:2px solid var(--milk);outline-offset:2px}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:15px 18px;font-weight:700;font-size:17px}
+button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
+.primary{background:var(--crema);color:var(--roast)}
+.ghost{background:var(--bean);color:var(--milk)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>button{flex:1 1 140px}
+.small{font-size:12px;color:var(--steam);line-height:1.6;margin:0}
+.count{font-family:var(--display);font-size:96px;text-align:center;color:var(--crema);line-height:1}
+.center{text-align:center}
+.big{font-family:var(--mono);font-size:56px;line-height:1;color:var(--crema);font-variant-numeric:tabular-nums}
+.big small{font-size:20px;color:var(--steam)}
+.rank{display:inline-block;align-self:center;background:var(--crema);color:var(--roast);font-weight:700;padding:4px 12px;border-radius:999px}
+.rank.bad{background:var(--cherry);color:var(--milk)}
+.resgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.resgrid .v{font-size:20px}.resgrid .v small{font-size:12px}
+.controls{display:flex;gap:8px;padding-top:10px}
+.controls>button{flex:1}
+@media (prefers-reduced-motion:reduce){.banner{transition:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="hud">
+    <div class="stat"><span class="k">きょり</span><span class="v" id="hDist">0.0<small>m</small></span></div>
+    <div class="stat"><span class="k">コーヒー</span><span class="v" id="hMl">0<small>ml</small></span></div>
+    <div class="stat"><span class="k">タイム</span><span class="v" id="hTime">0.0<small>s</small></span></div>
+    <div class="stat"><span class="k">はやさ</span><span class="v" id="hSpd">0.0<small>km/h</small></span></div>
+  </div>
+  <div class="track" aria-hidden="true">
+    <div class="rail"></div><div class="fill" id="tFill"></div>
+    <div class="me" id="tMe">🚶</div><div class="goal">10m</div>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="banner" id="banner">こぼれてる！</div>
+    <div class="note" id="note"></div>
+
+    <!-- title -->
+    <div class="overlay" id="ovTitle">
+      <div class="inner">
+        <h1>コーヒー<em>10m</em></h1>
+        <p class="lead">スマホがトレイ、画面のマグにはなみなみのコーヒー。本当に歩いて、本当に揺らさずに、10m先まで届けよう。</p>
+        <ul class="howto">
+          <li><b>1</b><span>画面を上にして、スマホを水平に両手で持つ</span></li>
+          <li><b>2</b><span>カウントダウン中は動かさない（いまの角度が基準になる）</span></li>
+          <li><b>3</b><span>歩いた歩数で距離を測る。急な動きや傾きでコーヒーが波打つ</span></li>
+        </ul>
+        <div class="field"><span>そそぎ具合</span>
+          <div class="seg" role="radiogroup">
+            <input type="radio" name="lv" id="lv0" value="0"><label for="lv0">ゆったり<small>210ml</small></label>
+            <input type="radio" name="lv" id="lv1" value="1" checked><label for="lv1">なみなみ<small>246ml</small></label>
+            <input type="radio" name="lv" id="lv2" value="2"><label for="lv2">表面張力<small>273ml</small></label>
+          </div>
+        </div>
+        <div class="field"><span>あなたの歩幅</span>
+          <div class="seg" role="radiogroup">
+            <input type="radio" name="st" id="st0" value="0.6"><label for="st0">小さめ<small>60cm</small></label>
+            <input type="radio" name="st" id="st1" value="0.7" checked><label for="st1">ふつう<small>70cm</small></label>
+            <input type="radio" name="st" id="st2" value="0.8"><label for="st2">大きめ<small>80cm</small></label>
+          </div>
+        </div>
+        <button class="primary" id="btnStart">スマホを持ってスタート</button>
+        <p class="small" id="best"></p>
+        <p class="small">PCではマウスで傾き、スペースキーで1歩の練習モードになります。</p>
+      </div>
+    </div>
+
+    <!-- calibration -->
+    <div class="overlay" id="ovCalib" hidden>
+      <div class="inner center">
+        <h2>水平に持って、そのまま</h2>
+        <div class="count" id="cnt">3</div>
+        <p class="small">いまの持ち方を「水平」として覚えます</p>
+      </div>
+    </div>
+
+    <!-- result -->
+    <div class="overlay" id="ovResult" hidden>
+      <div class="inner center">
+        <h2 id="rTitle">お待たせしました</h2>
+        <div class="big" id="rPct">100<small>%</small></div>
+        <span class="rank" id="rRank">バリスタ</span>
+        <div class="resgrid">
+          <div class="stat"><span class="k">きょり</span><span class="v" id="rDist">10.0<small>m</small></span></div>
+          <div class="stat"><span class="k">残り</span><span class="v" id="rMl">0<small>ml</small></span></div>
+          <div class="stat"><span class="k">タイム</span><span class="v" id="rTime">0<small>s</small></span></div>
+          <div class="stat"><span class="k">平均／最高</span><span class="v" id="rSpd">0<small>km/h</small></span></div>
+        </div>
+        <div class="row">
+          <button class="primary" id="btnShare">Xでシェア</button>
+          <button class="ghost" id="btnAgain">もう一杯</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls" id="ctrls" hidden>
+    <button class="ghost" id="btnStep" hidden>1歩すすむ（Space）</button>
+    <button class="ghost" id="btnQuit">やめる</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const G = 9.80665, GOAL = 10, CUP_ML = 300, HALF_W = 0.6; // mug: inner height 1, half width 0.6 (normalized)
+  const LEVELS = [
+    { level: 0.70, zeta: 0.16, name: "ゆったり" },
+    { level: 0.82, zeta: 0.09, name: "なみなみ" },
+    { level: 0.91, zeta: 0.06, name: "表面張力" },
+  ];
+  const F0 = 1.7;                                   // slosh natural frequency (Hz)
+  const OMEGA = 2 * Math.PI * F0, K = OMEGA * OMEGA;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  const $ = id => document.getElementById(id);
+  const cv = $("cv"), ctx = cv.getContext("2d");
+
+  // ---------- state ----------
+  let phase = "title";               // title | calib | play | result
+  let demo = false;
+  let raw = null, filt = null, base = null, baseMag = G, gotMotion = false;
+  let lp = 0, stepHigh = false, lastStep = 0;
+  let pointer = { x: 0.5, y: 0.5 };
+  const S = { sx: 0, sy: 0, vx: 0, vy: 0, level: 0.82, start: 0.82, zeta: 0.09, steps: 0, stride: 0.7, t0: 0, t: 0, spilling: 0, lv: 1,
+              speed: 0, maxSpeed: 0, stepInt: 0 };   // speed in m/s, stepInt = last step interval (ms)
+
+  // ---------- speed ----------
+  // Integrating raw acceleration drifts by metres per second within seconds, so walking speed is
+  // derived from what the sensor measures reliably: the step rhythm. speed = stride / step interval.
+  function registerStep(now) {
+    const dtStep = lastStep ? now - lastStep : 0;
+    lastStep = now;
+    S.steps++;
+    if (dtStep > 250 && dtStep < 2000) {
+      const inst = S.stride / (dtStep / 1000);
+      S.speed = S.speed ? S.speed * 0.5 + inst * 0.5 : inst;
+      S.stepInt = dtStep;
+      if (S.steps >= 3) S.maxSpeed = Math.max(S.maxSpeed, S.speed);
+    }
+  }
+  function decaySpeed(dt, now) {
+    // no new step for longer than ~1.5 intervals → slowing down / stopped
+    const wait = Math.max(900, S.stepInt * 1.5);
+    if (now - lastStep > wait) S.speed *= Math.exp(-dt * 2.5);
+    if (S.speed < 0.05) S.speed = 0;
+  }
+  const drops = [];
+  let lastVib = 0, wakeLock = null;
+
+  // ---------- sensors ----------
+  function onMotion(e) {
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x == null) return;
+    // iOS Safari reports the opposite sign convention from Android/Chrome
+    const s = isIOS ? -1 : 1;
+    raw = { x: a.x * s, y: a.y * s, z: a.z * s };
+    if (!filt) filt = { ...raw };
+    gotMotion = true;
+  }
+
+  async function enableSensors() {
+    if (!window.isSecureContext || typeof DeviceMotionEvent === "undefined") return false;
+    try {
+      if (typeof DeviceMotionEvent.requestPermission === "function") {
+        const r = await DeviceMotionEvent.requestPermission();
+        if (r !== "granted") return false;
+      }
+    } catch { return false; }
+    window.addEventListener("devicemotion", onMotion);
+    return true;
+  }
+
+  async function keepAwake() {
+    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+  }
+
+  // ---------- flow ----------
+  function pick(name) { return document.querySelector(`input[name=${name}]:checked`).value; }
+
+  $("btnStart").addEventListener("click", async () => {
+    S.lv = +pick("lv"); S.stride = +pick("st");
+    const ok = await enableSensors();
+    keepAwake();
+    $("ovTitle").hidden = true;
+    resetRun();
+    if (!ok) return startDemo("センサーが使えないので練習モードです（HTTPSのスマホで開いてね）");
+    calibrate();
+  });
+
+  function resetRun() {
+    const L = LEVELS[S.lv];
+    Object.assign(S, { sx: 0, sy: 0, vx: 0, vy: 0, level: L.level, start: L.level, zeta: L.zeta, steps: 0, t: 0, spilling: 0, speed: 0, maxSpeed: 0, stepInt: 0 });
+    drops.length = 0; lp = 0; stepHigh = false; lastStep = 0;
+    updateHud();
+  }
+
+  function calibrate() {
+    phase = "calib"; $("ovCalib").hidden = false;
+    let n = 3; $("cnt").textContent = n;
+    const samples = [];
+    const sampler = setInterval(() => { if (raw) samples.push({ ...raw }); }, 30);
+    const tick = setInterval(() => {
+      n--;
+      if (n > 0) { $("cnt").textContent = n; return; }
+      clearInterval(tick); clearInterval(sampler);
+      $("ovCalib").hidden = true;
+      if (!gotMotion || samples.length < 5) return startDemo("揺れが届かないので練習モードです");
+      const m = samples.slice(-40).reduce((a, s) => ({ x: a.x + s.x, y: a.y + s.y, z: a.z + s.z }), { x: 0, y: 0, z: 0 });
+      const c = samples.slice(-40).length;
+      base = { x: m.x / c, y: m.y / c, z: m.z / c };
+      baseMag = Math.hypot(base.x, base.y, base.z) || G;
+      filt = { ...base };
+      demo = false; startPlay("歩いてスタート！");
+    }, 1000);
+  }
+
+  function startDemo(msg) { demo = true; startPlay(msg); }
+
+  function startPlay(msg) {
+    phase = "play";
+    S.t0 = performance.now(); S.t = 0;
+    $("ctrls").hidden = false; $("btnStep").hidden = !demo;
+    $("note").textContent = msg || "";
+  }
+
+  function finish(empty) {
+    phase = "result";
+    $("ctrls").hidden = true; $("note").textContent = "";
+    const pct = empty ? 0 : Math.max(0, Math.round(S.level / S.start * 100));
+    const ml = Math.round(S.level * CUP_ML * (empty ? 0 : 1));
+    const dist = Math.min(GOAL, S.steps * S.stride);
+    const rank = empty ? "床のシミ" : pct >= 100 ? "神の手" : pct >= 95 ? "バリスタ" : pct >= 85 ? "ベテラン店員" : pct >= 70 ? "新人バイト" : pct >= 50 ? "ドジっ子" : "大惨事";
+    $("rTitle").textContent = empty ? "コーヒーは床に消えた" : "お待たせしました";
+    $("rPct").innerHTML = `${pct}<small>%</small>`;
+    $("rRank").textContent = rank;
+    $("rRank").className = "rank" + (pct < 70 ? " bad" : "");
+    $("rDist").innerHTML = `${dist.toFixed(1)}<small>m</small>`;
+    $("rMl").innerHTML = `${ml}<small>ml</small>`;
+    $("rTime").innerHTML = `${S.t.toFixed(1)}<small>s</small>`;
+    const avgKmh = S.t > 0 ? dist / S.t * 3.6 : 0, maxKmh = S.maxSpeed * 3.6;
+    $("rSpd").innerHTML = `${avgKmh.toFixed(1)}／${maxKmh.toFixed(1)}<small>km/h</small>`;
+    $("ovResult").hidden = false;
+    lastResult = { pct, ml, dist, time: S.t, rank, demo, lvName: LEVELS[S.lv].name, avgKmh };
+    if (!demo && !empty) saveBest(lastResult);
+  }
+  let lastResult = null;
+
+  $("btnQuit").addEventListener("click", () => { phase = "title"; $("ctrls").hidden = true; $("note").textContent = ""; $("ovTitle").hidden = false; showBest(); });
+  $("btnAgain").addEventListener("click", () => { $("ovResult").hidden = true; $("ovTitle").hidden = false; phase = "title"; showBest(); });
+  $("btnShare").addEventListener("click", () => {
+    if (!lastResult) return;
+    const r = lastResult;
+    const head = r.pct === 0 ? `☕ コーヒーを${r.dist.toFixed(1)}m運んで、ぜんぶこぼした…` : `☕ コーヒーを${r.dist.toFixed(1)}m運んだ！ 残量${r.pct}%（${r.ml}ml）`;
+    const text = `${head}\nタイム${r.time.toFixed(1)}秒（平均${r.avgKmh.toFixed(1)}km/h）・${r.lvName}・称号【${r.rank}】${r.demo ? "（練習モード）" : ""}\n#コーヒー10m`;
+    const u = new URL("https://x.com/intent/post");
+    u.searchParams.set("text", text);
+    if (/^https?:$/.test(location.protocol)) u.searchParams.set("url", location.origin + location.pathname);
+    window.open(u.toString(), "_blank", "noopener");
+  });
+
+  // demo controls
+  function demoStep() {
+    if (phase !== "play" || !demo) return;
+    registerStep(performance.now());
+    S.vx += (Math.random() - 0.5) * 0.9; S.vy += (Math.random() - 0.3) * 0.9;
+  }
+  $("btnStep").addEventListener("click", demoStep);
+  window.addEventListener("keydown", e => { if (e.code === "Space") { e.preventDefault(); demoStep(); } });
+  $("stage").addEventListener("pointermove", e => {
+    const r = cv.getBoundingClientRect();
+    pointer = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  });
+
+  // best score
+  function saveBest(r) {
+    try {
+      const k = "coffee10m.best." + S.lv;
+      const prev = JSON.parse(localStorage.getItem(k) || "null");
+      if (!prev || r.pct > prev.pct || (r.pct === prev.pct && r.time < prev.time)) localStorage.setItem(k, JSON.stringify({ pct: r.pct, time: r.time }));
+    } catch {}
+  }
+  function showBest() {
+    try {
+      const out = LEVELS.map((L, i) => { const b = JSON.parse(localStorage.getItem("coffee10m.best." + i) || "null"); return b ? `${L.name} ${b.pct}%・${b.time.toFixed(1)}s` : null; }).filter(Boolean);
+      $("best").textContent = out.length ? "自己ベスト：" + out.join(" ／ ") : "";
+    } catch { $("best").textContent = ""; }
+  }
+  showBest();
+
+  // ---------- simulation ----------
+  function step(dt, now) {
+    let tx = 0, ty = 0;
+    if (!demo && raw && base) {
+      for (const k of ["x", "y", "z"]) filt[k] += (raw[k] - filt[k]) * 0.45;
+      // effective gravity in the cup frame → target surface slope
+      tx = -(filt.x - base.x) / G;
+      ty = -(filt.y - base.y) / G;
+      // step detection from the vertical bob of walking
+      const dyn = Math.hypot(raw.x, raw.y, raw.z) - baseMag;
+      lp = lp * 0.75 + dyn * 0.25;
+      if (!stepHigh && lp > 1.1 && now - lastStep > 300) { stepHigh = true; registerStep(now); }
+      if (stepHigh && lp < 0.25) stepHigh = false;
+    } else if (demo) {
+      tx = -(pointer.x - 0.5) * 0.7;
+      ty = (pointer.y - 0.5) * 0.7;
+    }
+    tx = Math.max(-1.5, Math.min(1.5, tx)); ty = Math.max(-1.5, Math.min(1.5, ty));
+
+    const C = 2 * S.zeta * OMEGA, n = 4, h = dt / n;
+    for (let i = 0; i < n; i++) {
+      S.vx += (-K * (S.sx - tx) - C * S.vx) * h;
+      S.vy += (-K * (S.sy - ty) - C * S.vy) * h;
+      S.sx += S.vx * h; S.sy += S.vy * h;
+    }
+
+    // spill when the wave crest passes the rim
+    const gap = 1 - S.level;
+    const mag = Math.hypot(S.sx, S.sy);
+    const excess = mag * HALF_W - gap;
+    if (excess > 0) {
+      const loss = excess * 2.4 * dt;
+      S.level -= loss;
+      S.vx *= 1 - 3 * dt; S.vy *= 1 - 3 * dt;
+      S.spilling = 0.35;
+      const side = S.sx >= 0 ? 1 : -1;
+      const nd = Math.min(6, 1 + Math.floor(excess * 40));
+      for (let i = 0; i < nd; i++) drops.push({ x: side * (HALF_W + 0.02), y: 1.0, vx: side * (0.3 + Math.random() * 0.6) + S.vx * 0.05, vy: -0.4 - Math.random() * 0.5, life: 1.2 });
+      if (now - lastVib > 180) { navigator.vibrate?.(25); lastVib = now; }
+    }
+    S.spilling = Math.max(0, S.spilling - dt);
+    for (const d of drops) { d.vy += 3.2 * dt; d.x += d.vx * dt; d.y -= d.vy * dt; d.life -= dt; }
+    while (drops.length && drops[0].life <= 0) drops.shift();
+
+    decaySpeed(dt, now);
+    S.t = (now - S.t0) / 1000;
+    if (S.level < 0.12) { S.level = 0.12; return finish(true); }
+    if (S.steps * S.stride >= GOAL) finish(false);
+  }
+
+  // ---------- rendering ----------
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    const r = cv.getBoundingClientRect();
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = r.width; H = r.height;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  }
+  new ResizeObserver(resize).observe(cv);
+
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const COL = {};
+  function readCols() { for (const k of ["roast", "bean", "crema", "milk", "steam", "cherry", "leaf"]) COL[k] = css("--" + k); }
+  readCols();
+
+  function draw(now) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    if (W < 10 || H < 10) return;
+
+    // mug geometry (px)
+    const ih = Math.min(H * 0.5, W * 0.62);      // inner height
+    const hw = ih * HALF_W;                      // inner half width
+    const cx = W / 2 - ih * 0.08, bottom = H * 0.5 + ih * 0.5, top = bottom - ih;
+    const wall = Math.max(6, ih * 0.06);
+    const U = u => cx + u * ih;                  // normalized x → px
+    const V = v => bottom - v * ih;              // normalized height → px
+
+    // saucer shadow
+    ctx.fillStyle = "rgba(0,0,0,.35)";
+    ctx.beginPath(); ctx.ellipse(cx, bottom + wall + 10, hw * 1.6, ih * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = COL.bean;
+    ctx.beginPath(); ctx.ellipse(cx, bottom + wall + 4, hw * 1.55, ih * 0.06, 0, 0, Math.PI * 2); ctx.fill();
+
+    // handle
+    ctx.strokeStyle = COL.milk; ctx.lineWidth = wall * 1.4;
+    ctx.beginPath(); ctx.ellipse(cx + hw + wall * 0.6, top + ih * 0.45, ih * 0.2, ih * 0.24, 0, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+
+    // body
+    const r = ih * 0.16;
+    const bodyPath = (inset) => {
+      const x0 = cx - hw - wall + inset, x1 = cx + hw + wall - inset, y0 = top, y1 = bottom + wall - inset;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1 - r); ctx.quadraticCurveTo(x0, y1, x0 + r, y1);
+      ctx.lineTo(x1 - r, y1); ctx.quadraticCurveTo(x1, y1, x1, y1 - r); ctx.lineTo(x1, y0); ctx.closePath();
+    };
+    bodyPath(0); ctx.fillStyle = COL.milk; ctx.fill();
+
+    // liquid, clipped to the inside of the mug (side view: slope from x-slosh)
+    ctx.save();
+    bodyPath(wall); ctx.clip();
+    ctx.fillStyle = "#3a2216";
+    ctx.fillRect(cx - hw - wall, top - ih, (hw + wall) * 2, ih * 3);   // inner shadow / empty interior
+    const lvl = S.level, sx = S.sx, sy = S.sy;
+    const wob = Math.sin(now / 160) * 0.004;
+    ctx.beginPath();
+    ctx.moveTo(U(-HALF_W - 0.1), V(lvl - sx * (HALF_W + 0.1) + wob));
+    for (let i = 0; i <= 24; i++) {
+      const u = -HALF_W - 0.1 + (HALF_W * 2 + 0.2) * i / 24;
+      ctx.lineTo(U(u), V(lvl + sx * u + Math.sin(u * 9 + now / 120) * Math.min(0.02, Math.abs(S.vx) * 0.01)));
+    }
+    ctx.lineTo(U(HALF_W + 0.1), V(-0.2)); ctx.lineTo(U(-HALF_W - 0.1), V(-0.2)); ctx.closePath();
+    const grad = ctx.createLinearGradient(0, V(lvl), 0, V(0));
+    grad.addColorStop(0, "#6b3d22"); grad.addColorStop(1, "#2a140a");
+    ctx.fillStyle = grad; ctx.fill();
+    // crema line along the surface; thickness hints the front/back slosh
+    ctx.strokeStyle = COL.crema; ctx.lineWidth = Math.max(2, ih * (0.025 + Math.min(0.05, Math.abs(sy) * 0.08)));
+    ctx.beginPath(); ctx.moveTo(U(-HALF_W - 0.1), V(lvl - sx * (HALF_W + 0.1))); ctx.lineTo(U(HALF_W + 0.1), V(lvl + sx * (HALF_W + 0.1))); ctx.stroke();
+    ctx.restore();
+
+    // rim
+    ctx.fillStyle = COL.milk;
+    ctx.fillRect(cx - hw - wall, top - 2, (hw + wall) * 2, 4);
+
+    // steam
+    ctx.strokeStyle = "rgba(246,238,227,.18)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    for (let k = -1; k <= 1; k++) {
+      ctx.beginPath();
+      for (let i = 0; i <= 20; i++) {
+        const t = i / 20, y = top - 12 - t * ih * 0.45;
+        const x = cx + k * hw * 0.45 + Math.sin(t * 6 + now / 600 + k * 2) * 8 * t - sx * t * 30;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // drops
+    ctx.fillStyle = "#5a321c";
+    for (const d of drops) { ctx.globalAlpha = Math.max(0, Math.min(1, d.life)); ctx.beginPath(); ctx.arc(U(d.x), V(d.y), Math.max(2, ih * 0.018), 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+
+    // top-down slosh gauge (top-right): dot = wave crest, ring = rim
+    const gr = Math.min(52, W * 0.12), gx = W - gr - 4, gy = gr + 44;
+    const gap = Math.max(0.001, 1 - S.level);
+    const lim = gap / HALF_W;                      // slope at which it spills
+    const danger = Math.hypot(sx, sy) / lim;
+    ctx.fillStyle = COL.bean; ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = danger > 1 ? COL.cherry : danger > 0.7 ? COL.crema : COL.steam; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(gx, gy, gr - 3, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(168,150,138,.35)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(gx, gy, (gr - 3) * 0.7, 0, Math.PI * 2); ctx.stroke();
+    const dx = Math.max(-1.15, Math.min(1.15, sx / lim)), dy = Math.max(-1.15, Math.min(1.15, sy / lim));
+    ctx.fillStyle = danger > 1 ? COL.cherry : COL.crema;
+    ctx.beginPath(); ctx.arc(gx + dx * (gr - 3), gy - dy * (gr - 3), 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = COL.steam; ctx.font = `11px ${css("--body")}`; ctx.textAlign = "center";
+    ctx.fillText("水面", gx, gy + gr + 14);
+  }
+
+  function updateHud() {
+    const dist = Math.min(GOAL, S.steps * S.stride);
+    $("hDist").innerHTML = `${dist.toFixed(1)}<small>m</small>`;
+    $("hMl").innerHTML = `${Math.round(S.level * CUP_ML)}<small>ml</small>`;
+    $("hTime").innerHTML = `${S.t.toFixed(1)}<small>s</small>`;
+    $("hSpd").innerHTML = `${(S.speed * 3.6).toFixed(1)}<small>km/h</small>`;
+    const p = dist / GOAL * 100;
+    $("tFill").style.width = p + "%"; $("tMe").style.left = p + "%";
+    $("banner").classList.toggle("on", S.spilling > 0 && phase === "play");
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (phase === "play") step(dt, now);
+    else if (phase === "title") { S.sx = Math.sin(now / 900) * 0.08; S.sy = 0; } // idle sway on the title screen
+    draw(now);
+    updateHud();
+    requestAnimationFrame(loop);
+  }
+  resetRun();
+  requestAnimationFrame(loop);
+
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && phase === "play") keepAwake(); });
+})();
+</script>
+</body>
+</html>
