@@ -206,7 +206,11 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
   let phase = "title";               // title | calib | play | result
   let demo = false;
   let raw = null, filt = null, base = null, baseMag = G, gotMotion = false;
-  let lp = 0, stepHigh = false, lastStep = 0;
+  let lp = 0, stepHigh = false, lastStep = 0, peak = 0;
+  let baseUnit = { x: 0, y: 0, z: 1 }, extraSpill = 0, lastMotionT = 0;
+  // A walking step bobs the hands ~1–4 m/s² along gravity. Shaking the phone in place is far harder.
+  const STEP_MIN = 1.1, STEP_MAX = 4.5;   // accepted peak range for one step (m/s²)
+  const SLOSH_FROM = 3.5;                 // vertical jolts above this start throwing the coffee around
   let pointer = { x: 0.5, y: 0.5 };
   const S = { sx: 0, sy: 0, vx: 0, vy: 0, level: 0.82, start: 0.82, zeta: 0.09, steps: 0, stride: 0.7, t0: 0, t: 0, spilling: 0, lv: 1,
               speed: 0, maxSpeed: 0, stepInt: 0 };   // speed in m/s, stepInt = last step interval (ms)
@@ -243,6 +247,37 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
     raw = { x: a.x * s, y: a.y * s, z: a.z * s };
     if (!filt) filt = { ...raw };
     gotMotion = true;
+    if (phase === "play" && !demo && base) motionTick(performance.now());
+  }
+
+  // Runs at the sensor's own rate, so short spikes from shaking aren't missed between frames.
+  function motionTick(now) {
+    const dtm = lastMotionT ? Math.min(0.1, (now - lastMotionT) / 1000) : 1 / 60;
+    lastMotionT = now;
+    // acceleration along the calibrated "up" axis (walking bob), minus gravity
+    const vert = raw.x * baseUnit.x + raw.y * baseUnit.y + raw.z * baseUnit.z - baseMag;
+    const mag = Math.hypot(raw.x, raw.y, raw.z);
+
+    // step = one bump whose peak stays inside the walking range
+    lp = lp * 0.6 + vert * 0.4;
+    if (!stepHigh && lp > STEP_MIN) { stepHigh = true; peak = lp; }
+    if (stepHigh) {
+      peak = Math.max(peak, lp);
+      if (lp < 0.25) {
+        stepHigh = false;
+        if (peak > STEP_MAX) S.shake = 1.2;                       // too violent: not a step
+        else if (now - lastStep > 300 && S.shake <= 0) registerStep(now);
+      }
+    }
+
+    // hard vertical jolts slap the surface into waves in random directions
+    const over = Math.abs(vert) - SLOSH_FROM;
+    if (over > 0) {
+      const a = Math.random() * Math.PI * 2, kick = over * 12 * dtm;
+      S.vx += Math.cos(a) * kick; S.vy += Math.sin(a) * kick;
+    }
+    // near free fall (phone yanked down): the coffee leaves the cup
+    if (mag < 0.4 * G) extraSpill += (0.4 - mag / G) * 1.5 * dtm;
   }
 
   async function enableSensors() {
@@ -277,7 +312,7 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
   function resetRun() {
     const L = LEVELS[S.lv];
     Object.assign(S, { sx: 0, sy: 0, vx: 0, vy: 0, level: L.level, start: L.level, zeta: L.zeta, steps: 0, t: 0, spilling: 0, speed: 0, maxSpeed: 0, stepInt: 0 });
-    drops.length = 0; lp = 0; stepHigh = false; lastStep = 0;
+    drops.length = 0; lp = 0; stepHigh = false; lastStep = 0; peak = 0; extraSpill = 0; lastMotionT = 0; S.shake = 0;
     updateHud();
   }
 
@@ -296,6 +331,7 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
       const c = samples.slice(-40).length;
       base = { x: m.x / c, y: m.y / c, z: m.z / c };
       baseMag = Math.hypot(base.x, base.y, base.z) || G;
+      baseUnit = { x: base.x / baseMag, y: base.y / baseMag, z: base.z / baseMag };
       filt = { ...base };
       demo = false; startPlay("歩いてスタート！");
     }, 1000);
@@ -382,11 +418,6 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
       // effective gravity in the cup frame → target surface slope
       tx = -(filt.x - base.x) / G;
       ty = -(filt.y - base.y) / G;
-      // step detection from the vertical bob of walking
-      const dyn = Math.hypot(raw.x, raw.y, raw.z) - baseMag;
-      lp = lp * 0.75 + dyn * 0.25;
-      if (!stepHigh && lp > 1.1 && now - lastStep > 300) { stepHigh = true; registerStep(now); }
-      if (stepHigh && lp < 0.25) stepHigh = false;
     } else if (demo) {
       tx = -(pointer.x - 0.5) * 0.7;
       ty = (pointer.y - 0.5) * 0.7;
@@ -414,7 +445,12 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
       for (let i = 0; i < nd; i++) drops.push({ x: side * (HALF_W + 0.02), y: 1.0, vx: side * (0.3 + Math.random() * 0.6) + S.vx * 0.05, vy: -0.4 - Math.random() * 0.5, life: 1.2 });
       if (now - lastVib > 180) { navigator.vibrate?.(25); lastVib = now; }
     }
+    if (extraSpill > 0) {
+      S.level -= extraSpill; extraSpill = 0; S.spilling = 0.35;
+      for (let i = 0; i < 4; i++) drops.push({ x: (Math.random() - 0.5) * HALF_W * 2, y: 1.05, vx: (Math.random() - 0.5) * 0.8, vy: -0.8 - Math.random() * 0.6, life: 1.2 });
+    }
     S.spilling = Math.max(0, S.spilling - dt);
+    S.shake = Math.max(0, (S.shake || 0) - dt);
     for (const d of drops) { d.vy += 3.2 * dt; d.x += d.vx * dt; d.y -= d.vy * dt; d.life -= dt; }
     while (drops.length && drops[0].life <= 0) drops.shift();
 
@@ -539,7 +575,9 @@ button:focus-visible{outline:2px solid var(--milk);outline-offset:3px}
     $("hSpd").innerHTML = `${(S.speed * 3.6).toFixed(1)}<small>km/h</small>`;
     const p = dist / GOAL * 100;
     $("tFill").style.width = p + "%"; $("tMe").style.left = p + "%";
-    $("banner").classList.toggle("on", S.spilling > 0 && phase === "play");
+    const shaking = S.shake > 0;
+    $("banner").textContent = shaking ? "振りすぎ！歩数に入りません" : "こぼれてる！";
+    $("banner").classList.toggle("on", (S.spilling > 0 || shaking) && phase === "play");
   }
 
   let last = performance.now();
