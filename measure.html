@@ -4,16 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>速度計測ラボ</title>
-<meta name="description" content="加速度を積分した速度と、歩数から出した速度を並べて比べる計測ページ">
+<meta name="description" content="加速度・加速度の積分・歩数からの速度を、方角を固定して比べる計測ページ">
 <meta name="theme-color" content="#1b110c">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&family=DM+Mono:wght@500&display=swap">
 <style>
-/* Layout: one column instrument panel — two big readouts side by side, a live speed trace, then controls and raw values. Same espresso look as the game. */
+/* Layout: one column instrument panel — direction picker, three big readouts (acceleration → integral → steps), two live traces, then controls and raw values. Same espresso look as the game. */
 :root{
   --roast:#1b110c; --bean:#2c1d15; --line:#4a3528;
   --milk:#f6eee3; --steam:#a8968a; --crema:#e3b878; --cherry:#e2404f;
+  --sAcc:#d8cfc6;   /* series: acceleration (single-series chart) */
   --sInt:#3d9fd6;   /* series: acceleration integral */
   --sStep:#bd8230;  /* series: step rhythm */
   --display:"Dela Gothic One","Hiragino Sans","Yu Gothic",sans-serif;
@@ -31,19 +32,25 @@ main{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px;
 h1{font-family:var(--display);font-weight:400;font-size:30px;line-height:1.1;margin:0}
 .lead{margin:0;color:var(--steam);font-size:13px}
 a{color:var(--crema)}
-.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.card{background:var(--bean);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:4px;min-width:0}
-.card .k{font-size:12px;color:var(--steam);display:flex;align-items:center;gap:6px}
-.sw{width:14px;height:3px;border-radius:2px;display:inline-block}
-.card .v{font-family:var(--mono);font-size:34px;line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}
-.card .v small{font-size:13px;color:var(--steam);margin-left:3px}
-.card .sub{font-family:var(--mono);font-size:13px;color:var(--steam);font-variant-numeric:tabular-nums}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.card{background:var(--bean);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.card .k{font-size:11px;color:var(--steam);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.sw{width:12px;height:3px;border-radius:2px;display:inline-block;flex:none}
+.card .v{font-family:var(--mono);font-size:clamp(20px,6.4vw,30px);line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.card .u{font-family:var(--mono);font-size:11px;color:var(--steam)}
+.card .sub{font-family:var(--mono);font-size:11px;color:var(--steam);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dirbar{display:flex;align-items:center;gap:12px;background:var(--bean);border-radius:12px;padding:10px 12px}
+.dial{width:56px;height:56px;flex:none}
+.dirtext{display:flex;flex-direction:column;min-width:0}
+.dirtext .big{font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums}
+.dirtext .small{font-size:12px;color:var(--steam)}
 .chart{background:var(--bean);border-radius:12px;padding:10px 10px 6px;position:relative}
-.chart canvas{width:100%;height:200px;display:block;touch-action:none}
-.legend{display:flex;gap:14px;font-size:12px;color:var(--steam);padding:0 4px 6px;flex-wrap:wrap}
+.chart canvas{width:100%;height:170px;display:block;touch-action:none}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--steam);padding:0 4px 6px;flex-wrap:wrap}
 .legend span{display:flex;align-items:center;gap:6px}
+.legend b{color:var(--milk);font-weight:700}
 .tip{position:absolute;pointer-events:none;background:var(--roast);border:1px solid var(--line);border-radius:8px;padding:6px 8px;
-  font-family:var(--mono);font-size:12px;line-height:1.5;white-space:nowrap;color:var(--milk)}
+  font-family:var(--mono);font-size:12px;line-height:1.5;white-space:nowrap;color:var(--milk);top:34px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .row>*{flex:1 1 120px}
 button{font:inherit;font-weight:700;cursor:pointer;border:0;border-radius:12px;padding:14px 16px;font-size:16px}
@@ -55,10 +62,12 @@ button:disabled{opacity:.45;cursor:default}
 .status{font-size:13px;color:var(--crema);min-height:1.6em;margin:0}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-size:11px;letter-spacing:.1em;color:var(--steam)}
-.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.seg.three{grid-template-columns:repeat(3,1fr)}
 .seg input{position:absolute;opacity:0;pointer-events:none}
-.seg label{background:var(--bean);border:1.5px solid transparent;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;font-weight:700;font-size:14px}
+.seg label{background:var(--bean);border:1.5px solid transparent;border-radius:10px;padding:8px 4px;text-align:center;cursor:pointer;font-weight:700;font-size:13px;line-height:1.3}
 .seg input:checked+label{border-color:var(--crema);color:var(--crema)}
+.seg input:disabled+label{opacity:.4;cursor:default}
 .seg input:focus-visible+label{outline:2px solid var(--milk);outline-offset:2px}
 .result{background:var(--bean);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
 .result h2{font-family:var(--display);font-weight:400;font-size:20px;margin:0}
@@ -78,29 +87,58 @@ td:first-child{font-family:var(--body)}
 <body>
 <main>
   <h1>速度計測ラボ</h1>
-  <p class="lead">加速度を積分した速度と、歩くリズムから出した速度を並べて表示します。10m歩いて、どちらが正しいか比べてみてください。<a href="./">ゲームに戻る</a></p>
+  <p class="lead">選んだ方向の加速度、それを積分した速度、歩くリズムから出した速度を並べて表示します。10m歩いて比べてみてください。<a href="./">ゲームに戻る</a></p>
 
-  <div class="pair">
+  <div class="field"><span>加速度を測る方向</span>
+    <div class="seg" role="radiogroup">
+      <input type="radio" name="dir" id="dDev" value="device" checked><label for="dDev">スマホの<br>上側</label>
+      <input type="radio" name="dir" id="dStart" value="start"><label for="dStart">スタート時<br>の方角</label>
+      <input type="radio" name="dir" id="dN" value="0"><label for="dN">北</label>
+      <input type="radio" name="dir" id="dE" value="90"><label for="dE">東</label>
+    </div>
+  </div>
+
+  <div class="dirbar">
+    <canvas class="dial" id="dial" width="112" height="112" aria-label="方位"></canvas>
+    <div class="dirtext">
+      <span class="big" id="hdg">方角 —</span>
+      <span class="small" id="hdgNote">方角は「計測スタート」後に表示されます</span>
+    </div>
+  </div>
+
+  <div class="trio">
     <div class="card">
-      <span class="k"><i class="sw" style="background:var(--sInt)"></i>加速度の積分</span>
-      <span class="v" id="vInt">0.00<small>m/s</small></span>
-      <span class="sub" id="dInt">距離 0.00 m</span>
+      <span class="k"><i class="sw" style="background:var(--sAcc)"></i>加速度</span>
+      <span class="v" id="vAcc">0.00</span><span class="u">m/s²</span>
+      <span class="sub" id="dAcc">最大 0.00</span>
     </div>
     <div class="card">
-      <span class="k"><i class="sw" style="background:var(--sStep)"></i>歩くリズム</span>
-      <span class="v" id="vStep">0.00<small>m/s</small></span>
-      <span class="sub" id="dStep">距離 0.00 m・0歩</span>
+      <span class="k"><i class="sw" style="background:var(--sInt)"></i>積分の速度</span>
+      <span class="v" id="vInt">0.00</span><span class="u">m/s</span>
+      <span class="sub" id="dInt">0.00 m</span>
+    </div>
+    <div class="card">
+      <span class="k"><i class="sw" style="background:var(--sStep)"></i>歩数の速度</span>
+      <span class="v" id="vStep">0.00</span><span class="u">m/s</span>
+      <span class="sub" id="dStep">0.00 m・0歩</span>
     </div>
   </div>
 
   <div class="chart">
+    <div class="legend"><span><b>加速度</b></span><span id="accLegend">スマホの上側</span><span>縦軸 m/s²・直近20秒</span></div>
+    <canvas id="cvAcc" aria-label="直近20秒の加速度の推移"></canvas>
+    <div class="tip" id="tipAcc" hidden></div>
+  </div>
+
+  <div class="chart">
     <div class="legend">
-      <span><i class="sw" style="background:var(--sInt)"></i>加速度の積分（前方向）</span>
+      <span><b>速度</b></span>
+      <span><i class="sw" style="background:var(--sInt)"></i>加速度の積分</span>
       <span><i class="sw" style="background:var(--sStep)"></i>歩くリズム</span>
-      <span>縦軸 m/s・直近20秒</span>
+      <span>縦軸 m/s</span>
     </div>
-    <canvas id="cv" aria-label="直近20秒の速度の推移"></canvas>
-    <div class="tip" id="tip" hidden></div>
+    <canvas id="cvVel" aria-label="直近20秒の速度の推移"></canvas>
+    <div class="tip" id="tipVel" hidden></div>
   </div>
 
   <p class="status" id="status">「計測スタート」を押して、2秒間スマホを水平に持ったまま静止してください。</p>
@@ -120,7 +158,7 @@ td:first-child{font-family:var(--body)}
   </div>
 
   <div class="field"><span>歩幅（歩くリズムの計算に使用）</span>
-    <div class="seg">
+    <div class="seg three">
       <input type="radio" name="st" id="st0" value="0.6"><label for="st0">60cm</label>
       <input type="radio" name="st" id="st1" value="0.7" checked><label for="st1">70cm</label>
       <input type="radio" name="st" id="st2" value="0.8"><label for="st2">80cm</label>
@@ -128,25 +166,29 @@ td:first-child{font-family:var(--body)}
   </div>
 
   <div class="raw">
-    <div><div class="k">前後の加速度</div><div class="v" id="rF">0.00</div></div>
-    <div><div class="k">左右の加速度</div><div class="v" id="rR">0.00</div></div>
+    <div><div class="k">東向きの加速度</div><div class="v" id="rE">—</div></div>
+    <div><div class="k">北向きの加速度</div><div class="v" id="rN">—</div></div>
     <div><div class="k">上下の加速度</div><div class="v" id="rU">0.00</div></div>
+    <div><div class="k">スマホ前後</div><div class="v" id="rF">0.00</div></div>
+    <div><div class="k">スマホ左右</div><div class="v" id="rR">0.00</div></div>
     <div><div class="k">横方向の速度</div><div class="v" id="rVr">0.00</div></div>
     <div><div class="k">重力の除去</div><div class="v" id="rSrc">—</div></div>
+    <div><div class="k">方角センサー</div><div class="v" id="rOri">—</div></div>
     <div><div class="k">センサー周期</div><div class="v" id="rHz">—</div></div>
   </div>
 
   <ol class="how">
     <li>画面を上にしてスマホを水平に持ち、画面の上側を進む方向に向けます。</li>
-    <li>「計測スタート」を押し、2秒間じっとします（重力とセンサーのずれを測ります）。</li>
+    <li>測る方向を選び、「計測スタート」を押して2秒間じっとします（重力とセンサーのずれを測ります）。</li>
     <li>まっすぐ10m歩いて止まり、「10m着いた」を押します。</li>
+    <li>方角は磁気センサー頼みです。屋内や鉄骨の近くでは10〜20°ずれることがあります。ずれる時はスマホを8の字に回すと補正されます。</li>
   </ol>
 </main>
 
 <script>
 (() => {
   "use strict";
-  const G = 9.80665, WINDOW_S = 20;
+  const WINDOW_S = 20, D2R = Math.PI / 180;
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const $ = id => document.getElementById(id);
   const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
@@ -154,21 +196,51 @@ td:first-child{font-family:var(--body)}
   const mul = (a, s) => ({ x: a.x * s, y: a.y * s, z: a.z * s });
   const norm = a => { const m = Math.hypot(a.x, a.y, a.z) || 1; return mul(a, 1 / m); };
   const cross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
+  const DIRNAMES = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
+  const dirName = h => DIRNAMES[Math.round(((h % 360) + 360) % 360 / 45) % 8];
 
   // ---- state ----
   let phase = "idle";                  // idle | calib | run | done
-  let gLP = null;                      // low-passed gravity (used when the OS gives no gravity-free acceleration)
-  let lastT = 0, hzEMA = 0, useOS = false;
+  let gLP = null, lastT = 0, hzEMA = 0, useOS = false;
+  let ori = null;                      // {alpha, beta, gamma} with alpha measured from north
+  let oriKind = "";                    // label for the raw panel
+  let R = null, heading = null;        // device→earth rotation, phone-top bearing (deg, clockwise from north)
   let calib = [];
-  let bias = { f: 0, r: 0 };
-  const M = { vf: 0, vr: 0, xf: 0, steps: 0, stepSpeed: 0, stepInt: 0, lastStep: 0, t0: 0 };
+  let bias = { f: 0, r: 0, e: 0, n: 0 }, startHeading = 0;
+  let dirMode = "device";              // "device" | "start" | bearing in degrees as string
+  const M = { vf: 0, vr: 0, xf: 0, steps: 0, stepSpeed: 0, stepInt: 0, lastStep: 0, t0: 0, aMax: 0 };
   let lp = 0, stepHigh = false, peak = 0;
-  let cur = { af: 0, ar: 0, au: 0 };
-  const hist = [];                     // {t, vi, vs}
+  let cur = { af: 0, ar: 0, au: 0, ae: null, an: null, aDir: 0, aShow: 0 };
+  const hist = [];                     // {t, a, vi, vs}
   let lastHist = 0;
   const stride = () => +document.querySelector("input[name=st]:checked").value;
 
-  // ---- sensor ----
+  // ---- orientation (compass) ----
+  // Rotation matrix from the W3C DeviceOrientation spec: earth = R · device, earth axes x=East, y=North, z=Up.
+  function rotation(alpha, beta, gamma) {
+    const x = beta * D2R, y = gamma * D2R, z = alpha * D2R;
+    const cX = Math.cos(x), cY = Math.cos(y), cZ = Math.cos(z), sX = Math.sin(x), sY = Math.sin(y), sZ = Math.sin(z);
+    return [
+      cZ * cY - sZ * sX * sY, -cX * sZ, cY * sZ * sX + cZ * sY,
+      cY * sZ + cZ * sX * sY,  cZ * cX, sZ * sY - cZ * cY * sX,
+      -cX * sY,                sX,      cX * cY,
+    ];
+  }
+  function onOrientation(e) {
+    if (e.alpha == null) return;
+    let alpha = e.alpha;
+    if (typeof e.webkitCompassHeading === "number" && e.webkitCompassHeading >= 0) {
+      alpha = 360 - e.webkitCompassHeading;                  // iOS: alpha is relative, the compass heading is not
+      oriKind = "コンパス";
+    } else if (e.absolute || e.type === "deviceorientationabsolute") {
+      oriKind = "絶対方位";
+    } else { oriKind = "相対のみ"; return; }                  // no north reference: can't fix a compass direction
+    ori = { alpha, beta: e.beta || 0, gamma: e.gamma || 0 };
+    R = rotation(ori.alpha, ori.beta, ori.gamma);
+    heading = (Math.atan2(R[1], R[4]) / D2R + 360) % 360;    // where the phone's top edge points
+  }
+
+  // ---- motion ----
   function onMotion(e) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null) return;
@@ -179,32 +251,43 @@ td:first-child{font-family:var(--body)}
     lastT = now;
     if (dt > 0) hzEMA = hzEMA ? hzEMA * 0.95 + (1 / dt) * 0.05 : 1 / dt;
 
-    // gravity-free acceleration and the "up" direction
+    // gravity-free acceleration and the "up" direction in the phone's own frame
     let lin, gvec;
     const la = e.acceleration;
-    if (la && la.x != null) {
-      useOS = true;
-      lin = { x: la.x * s, y: la.y * s, z: la.z * s };
-      gvec = sub(aig, lin);
-    } else {
+    if (la && la.x != null) { useOS = true; lin = { x: la.x * s, y: la.y * s, z: la.z * s }; gvec = sub(aig, lin); }
+    else {
       useOS = false;
       gLP = gLP ? { x: gLP.x + (aig.x - gLP.x) * 0.04, y: gLP.y + (aig.y - gLP.y) * 0.04, z: gLP.z + (aig.z - gLP.z) * 0.04 } : { ...aig };
       gvec = gLP; lin = sub(aig, gLP);
     }
     const up = norm(gvec);
-    // forward = the phone's top edge, flattened onto the horizontal plane
     const yDev = { x: 0, y: 1, z: 0 };
-    const fwd = norm(sub(yDev, mul(up, dot(yDev, up))));
+    const fwd = norm(sub(yDev, mul(up, dot(yDev, up))));        // phone top, flattened onto the floor plane
     const right = cross(fwd, up);
     const af = dot(lin, fwd), ar = dot(lin, right), au = dot(lin, up);
-    cur = { af, ar, au };
+    // the same acceleration in compass axes (needs an absolute orientation)
+    let ae = null, an = null;
+    if (R) { ae = R[0] * lin.x + R[1] * lin.y + R[2] * lin.z; an = R[3] * lin.x + R[4] * lin.y + R[5] * lin.z; }
+    cur.af = af; cur.ar = ar; cur.au = au; cur.ae = ae; cur.an = an;
 
-    if (phase === "calib") { calib.push({ f: af, r: ar }); return; }
+    if (phase === "calib") { calib.push({ f: af, r: ar, e: ae, n: an, h: heading }); return; }
+
+    // acceleration along the chosen direction (bias removed) and across it
+    let aDir, aSide;
+    if (dirMode === "device" || ae == null) { aDir = af - bias.f; aSide = ar - bias.r; }
+    else {
+      const th = (dirMode === "start" ? startHeading : +dirMode) * D2R;
+      const e2 = ae - bias.e, n2 = an - bias.n;
+      aDir = e2 * Math.sin(th) + n2 * Math.cos(th);
+      aSide = e2 * Math.cos(th) - n2 * Math.sin(th);
+    }
+    cur.aDir = aDir;
+    cur.aShow = cur.aShow * 0.8 + aDir * 0.2;                  // lightly smoothed for reading
     if (phase !== "run" || dt === 0) return;
 
     // 1) plain integration: v = ∫a dt, x = ∫v dt
-    const f = af - bias.f, r = ar - bias.r;
-    M.vf += f * dt; M.vr += r * dt; M.xf += M.vf * dt;
+    M.vf += aDir * dt; M.vr += aSide * dt; M.xf += M.vf * dt;
+    M.aMax = Math.max(M.aMax, Math.abs(cur.aShow));
 
     // 2) step rhythm: stride / step interval
     lp = lp * 0.6 + au * 0.4;
@@ -223,28 +306,32 @@ td:first-child{font-family:var(--body)}
     if (now - M.lastStep > Math.max(900, M.stepInt * 1.5)) M.stepSpeed *= Math.exp(-dt * 2.5);
     if (M.stepSpeed < 0.02) M.stepSpeed = 0;
 
-    if (now - lastHist > 100) { lastHist = now; hist.push({ t: (now - M.t0) / 1000, vi: M.vf, vs: M.stepSpeed }); }
+    if (now - lastHist > 50) { lastHist = now; hist.push({ t: (now - M.t0) / 1000, a: cur.aShow, vi: M.vf, vs: M.stepSpeed }); }
   }
 
   // Returns "ok" | "denied" | "unsupported". Never waits forever: some browsers leave
   // requestPermission() pending, so whether sensor values actually arrive decides in the end.
   async function enableSensors() {
     if (!window.isSecureContext || typeof DeviceMotionEvent === "undefined") return "unsupported";
-    window.addEventListener("devicemotion", onMotion);      // Android sends values without asking
-    if (typeof DeviceMotionEvent.requestPermission === "function") {
-      try {
-        const r = await Promise.race([
-          DeviceMotionEvent.requestPermission(),             // iOS: must be called inside the tap
-          new Promise(res => setTimeout(() => res("timeout"), 4000)),
-        ]);
-        if (r === "denied") return "denied";
-      } catch { /* refused to ask: fall through, the incoming values decide */ }
-    }
-    return "ok";
+    window.addEventListener("devicemotion", onMotion);       // Android sends values without asking
+    if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", onOrientation);
+    else window.addEventListener("deviceorientation", onOrientation);
+    // iOS: both requests must start inside the tap, before anything is awaited
+    const asks = [];
+    if (typeof DeviceMotionEvent.requestPermission === "function") asks.push(DeviceMotionEvent.requestPermission().catch(() => "error"));
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") asks.push(DeviceOrientationEvent.requestPermission().catch(() => "error"));
+    if (!asks.length) return "ok";
+    const timeout = new Promise(res => setTimeout(() => res(["timeout"]), 4000));
+    const r = await Promise.race([Promise.all(asks), timeout]);
+    return r[0] === "denied" ? "denied" : "ok";
   }
 
   // ---- controls ----
   let sensorsOn = false;
+  const dirInputs = [...document.querySelectorAll("input[name=dir]")];
+  const dirLabel = () => dirMode === "device" ? "スマホの上側" : dirMode === "start" ? `スタート時の方角（${dirName(startHeading)} ${Math.round(startHeading)}°）` : `${dirName(+dirMode)}向き`;
+  dirInputs.forEach(i => i.addEventListener("change", () => { dirMode = i.value; $("accLegend").textContent = dirLabel(); }));
+
   $("btnStart").addEventListener("click", async () => {
     if (!sensorsOn) {
       $("status").textContent = "センサーを準備しています…";
@@ -256,20 +343,36 @@ td:first-child{font-family:var(--body)}
       sensorsOn = true;
       navigator.wakeLock?.request("screen").catch(() => {});   // don't wait: it can take seconds or never settle
     }
-    Object.assign(M, { vf: 0, vr: 0, xf: 0, steps: 0, stepSpeed: 0, stepInt: 0, lastStep: 0 });
-    hist.length = 0; lp = 0; stepHigh = false; calib = [];
+    Object.assign(M, { vf: 0, vr: 0, xf: 0, steps: 0, stepSpeed: 0, stepInt: 0, lastStep: 0, aMax: 0 });
+    hist.length = 0; lp = 0; stepHigh = false; calib = []; cur.aShow = 0;
     $("result").hidden = true;
     phase = "calib";
     $("status").textContent = "静止して測っています…（2秒）";
     $("btnStart").disabled = true;
+    dirInputs.forEach(i => i.disabled = true);
     setTimeout(() => {
+      dirInputs.forEach(i => i.disabled = false);
       if (calib.length < 10) { phase = "idle"; sensorsOn = false; $("btnStart").disabled = false; $("status").textContent = "センサーの値が届きません。モーションへのアクセスを許可してから、もう一度「計測スタート」を押してください。"; return; }
       const tail = calib.slice(Math.floor(calib.length / 3));   // skip the moment of the tap
-      bias = { f: tail.reduce((s, c) => s + c.f, 0) / tail.length, r: tail.reduce((s, c) => s + c.r, 0) / tail.length };
+      const avg = k => { const v = tail.filter(c => c[k] != null); return v.length ? v.reduce((s, c) => s + c[k], 0) / v.length : 0; };
+      bias = { f: avg("f"), r: avg("r"), e: avg("e"), n: avg("n") };
+      const hs = tail.filter(c => c.h != null);
+      if (hs.length) {
+        const sx = hs.reduce((s, c) => s + Math.sin(c.h * D2R), 0), cx = hs.reduce((s, c) => s + Math.cos(c.h * D2R), 0);
+        startHeading = (Math.atan2(sx, cx) / D2R + 360) % 360;
+      }
+      const needsCompass = dirMode !== "device";
+      if (needsCompass && !R) {
+        dirMode = "device"; $("dDev").checked = true;
+        $("status").textContent = "この端末では方角が取れないので「スマホの上側」で測ります。まっすぐ10m歩いてください。";
+      } else {
+        $("status").textContent = `計測中。まっすぐ10m歩いてください（${dirLabel()}を測定）`;
+      }
+      $("accLegend").textContent = dirLabel();
       M.t0 = performance.now(); phase = "run";
-      $("status").textContent = `計測中。まっすぐ10m歩いてください（センサーのずれ ${bias.f.toFixed(3)} m/s² を補正済み）`;
       $("btnStop").disabled = false; $("btnZero").disabled = false; $("btnStart").disabled = false;
       $("btnStart").textContent = "やり直す";
+      dirInputs.forEach(i => i.disabled = true);
     }, 2000);
   });
 
@@ -278,96 +381,119 @@ td:first-child{font-family:var(--body)}
   $("btnStop").addEventListener("click", () => {
     if (phase !== "run") return;
     phase = "done";
+    dirInputs.forEach(i => i.disabled = false);
     $("btnStop").disabled = true; $("btnZero").disabled = true;
     const t = (performance.now() - M.t0) / 1000;
-    const dStep = M.steps * stride();
-    const rows = [
-      ["加速度の積分", M.xf, M.vf],
-      ["歩くリズム", dStep, M.stepSpeed],
-    ];
+    const rows = [["加速度の積分", M.xf, M.vf], ["歩くリズム", M.steps * stride(), M.stepSpeed]];
     $("resBody").innerHTML = rows.map(([n, d, v]) => {
       const err = d - 10;
       return `<tr><td>${n}</td><td>${d.toFixed(2)} m</td><td>${err >= 0 ? "+" : ""}${err.toFixed(2)} m</td><td>${v.toFixed(2)} m/s</td></tr>`;
     }).join("");
-    $("resNote").textContent = `所要 ${t.toFixed(1)} 秒。止まっているので本当の速度は 0 m/s です。積分の「最後の速度」が 0 からどれだけ離れているかが、たまった誤差の大きさです。`;
+    $("resNote").textContent = `測った方向：${dirLabel()}。所要 ${t.toFixed(1)} 秒。止まっているので本当の速度は 0 m/s です。積分の「最後の速度」が 0 からどれだけ離れているかが、たまった誤差の大きさです。`;
     $("result").hidden = false;
     $("status").textContent = "計測を止めました。「やり直す」でもう一度測れます。";
   });
 
-  // ---- chart ----
-  const cv = $("cv"), ctx = cv.getContext("2d"), tip = $("tip");
-  let W = 0, H = 0, DPR = 1, hoverX = null;
-  function resize() { const r = cv.getBoundingClientRect(); DPR = Math.min(2, devicePixelRatio || 1); W = r.width; H = r.height; cv.width = W * DPR; cv.height = H * DPR; }
-  new ResizeObserver(resize).observe(cv);
+  // ---- charts ----
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  const C = { int: css("--sInt"), step: css("--sStep"), line: css("--line"), steam: css("--steam"), milk: css("--milk"), mono: css("--mono") };
-  cv.addEventListener("pointermove", e => { const r = cv.getBoundingClientRect(); hoverX = e.clientX - r.left; });
-  cv.addEventListener("pointerleave", () => { hoverX = null; tip.hidden = true; });
+  const C = { acc: css("--sAcc"), int: css("--sInt"), step: css("--sStep"), line: css("--line"), steam: css("--steam"), milk: css("--milk"), crema: css("--crema"), mono: css("--mono") };
 
-  function niceMax(v) { const steps = [1, 2, 4, 8, 12, 16, 24]; /* divisible into 4 even gridlines */ for (const s of steps) if (v <= s) return s; return Math.ceil(v / 10) * 10; }
+  function makeChart(canvasId, tipId, series, symmetric, fmt) {
+    const cv = $(canvasId), ctx = cv.getContext("2d"), tip = $(tipId);
+    const st = { W: 0, H: 0, DPR: 1, hoverX: null };
+    new ResizeObserver(() => { const r = cv.getBoundingClientRect(); st.DPR = Math.min(2, devicePixelRatio || 1); st.W = r.width; st.H = r.height; cv.width = st.W * st.DPR; cv.height = st.H * st.DPR; }).observe(cv);
+    cv.addEventListener("pointermove", e => { st.hoverX = e.clientX - cv.getBoundingClientRect().left; });
+    cv.addEventListener("pointerleave", () => { st.hoverX = null; tip.hidden = true; });
+    const niceMax = v => { for (const s of [0.5, 1, 2, 4, 8, 12, 16, 24]) if (v <= s) return s; return Math.ceil(v / 8) * 8; };
 
-  function drawChart() {
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    const pl = 34, pr = 8, pt = 8, pb = 20;
-    const now = phase === "run" ? (performance.now() - M.t0) / 1000 : (hist.length ? hist[hist.length - 1].t : 0);
-    const t1 = Math.max(WINDOW_S, now), t0 = t1 - WINDOW_S;
-    const pts = hist.filter(p => p.t >= t0);
-    let lo = 0, hi = 0;
-    for (const p of pts) { lo = Math.min(lo, p.vi, p.vs); hi = Math.max(hi, p.vi, p.vs); }
-    const yMax = niceMax(Math.max(2, hi)), yMin = lo < 0 ? -niceMax(-lo) : 0;
-    const X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr);
-    const Y = v => pt + (yMax - v) / (yMax - yMin) * (H - pt - pb);
+    return function draw() {
+      const { W, H, DPR } = st;
+      if (W < 10) return;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const pl = 34, pr = 8, pt = 8, pb = 20;
+      const now = phase === "run" ? (performance.now() - M.t0) / 1000 : (hist.length ? hist[hist.length - 1].t : 0);
+      const t1 = Math.max(WINDOW_S, now), t0 = t1 - WINDOW_S;
+      const pts = hist.filter(p => p.t >= t0);
+      let lo = 0, hi = 0;
+      for (const p of pts) for (const s of series) { lo = Math.min(lo, p[s.key]); hi = Math.max(hi, p[s.key]); }
+      let yMax, yMin, step;
+      if (symmetric) { yMax = niceMax(Math.max(1, -lo, hi)); yMin = -yMax; step = yMax / 2; }
+      else { yMax = niceMax(Math.max(2, hi)); step = yMax / 4; yMin = lo < 0 ? -Math.ceil(-lo / step) * step : 0; }
+      const X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr);
+      const Y = v => pt + (yMax - v) / (yMax - yMin) * (H - pt - pb);
 
-    // grid + y labels
-    ctx.font = `11px ${C.mono}`; ctx.fillStyle = C.steam; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    const step = (yMax - yMin) / 4;
-    for (let i = 0; i <= 4; i++) {
-      const v = yMin + step * i, y = Y(v);
-      ctx.strokeStyle = C.line; ctx.lineWidth = v === 0 ? 1.5 : 1; ctx.globalAlpha = v === 0 ? 1 : 0.5;
-      ctx.beginPath(); ctx.moveTo(pl, y); ctx.lineTo(W - pr, y); ctx.stroke(); ctx.globalAlpha = 1;
-      ctx.fillText(Number.isInteger(v) ? v : v.toFixed(1), pl - 6, y);
-    }
-    // x labels (seconds)
-    ctx.textAlign = "center"; ctx.textBaseline = "top";
-    for (let s = Math.ceil(t0 / 5) * 5; s <= t1; s += 5) ctx.fillText(s + "s", X(s), H - pb + 4);
+      ctx.font = `11px ${C.mono}`; ctx.fillStyle = C.steam; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      const nLines = Math.round((yMax - yMin) / step);
+      for (let i = 0; i <= nLines; i++) {
+        const v = yMin + step * i, y = Y(v);
+        ctx.strokeStyle = C.line; ctx.lineWidth = v === 0 ? 1.5 : 1; ctx.globalAlpha = v === 0 ? 1 : 0.5;
+        ctx.beginPath(); ctx.moveTo(pl, y); ctx.lineTo(W - pr, y); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.fillText(Number.isInteger(v) ? v : v.toFixed(1), pl - 6, y);
+      }
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      for (let s = Math.ceil(t0 / 5) * 5; s <= t1; s += 5) ctx.fillText(s + "s", X(s), H - pb + 4);
 
-    // series
-    for (const [key, col] of [["vs", C.step], ["vi", C.int]]) {
-      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
-      pts.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p[key])) : ctx.moveTo(X(p.t), Y(p[key])));
-      ctx.stroke();
-      const last = pts[pts.length - 1];
-      if (last) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(last.t), Y(last[key]), 4, 0, Math.PI * 2); ctx.fill(); }
-    }
+      for (const s of series) {
+        ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+        pts.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p[s.key])) : ctx.moveTo(X(p.t), Y(p[s.key])));
+        ctx.stroke();
+        const last = pts[pts.length - 1];
+        if (last) { ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(X(last.t), Y(last[s.key]), 4, 0, Math.PI * 2); ctx.fill(); }
+      }
 
-    // hover crosshair + tooltip
-    if (hoverX != null && pts.length) {
-      const t = t0 + (hoverX - pl) / (W - pl - pr) * (t1 - t0);
-      let best = pts[0]; for (const p of pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
-      const x = X(best.t);
-      ctx.strokeStyle = C.steam; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, pt); ctx.lineTo(x, H - pb); ctx.stroke();
-      for (const [key, col] of [["vi", C.int], ["vs", C.step]]) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, Y(best[key]), 4, 0, Math.PI * 2); ctx.fill(); }
-      tip.hidden = false;
-      tip.textContent = `${best.t.toFixed(1)}s　積分 ${best.vi.toFixed(2)}　歩数 ${best.vs.toFixed(2)} m/s`;
-      const tw = tip.offsetWidth;
-      tip.style.left = Math.min(Math.max(10, x + 10 + 10), W - tw + 10) + "px";
-      tip.style.top = "34px";
-    }
+      if (st.hoverX != null && pts.length) {
+        const t = t0 + (st.hoverX - pl) / (W - pl - pr) * (t1 - t0);
+        let best = pts[0]; for (const p of pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+        const x = X(best.t);
+        ctx.strokeStyle = C.steam; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, pt); ctx.lineTo(x, H - pb); ctx.stroke();
+        for (const s of series) { ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(x, Y(best[s.key]), 4, 0, Math.PI * 2); ctx.fill(); }
+        tip.hidden = false;
+        tip.textContent = fmt(best);
+        tip.style.left = Math.min(Math.max(10, x + 20), W - tip.offsetWidth + 10) + "px";
+      }
+    };
+  }
+  const drawAcc = makeChart("cvAcc", "tipAcc", [{ key: "a", color: C.acc }], true, p => `${p.t.toFixed(1)}s　加速度 ${p.a.toFixed(2)} m/s²`);
+  const drawVel = makeChart("cvVel", "tipVel", [{ key: "vs", color: C.step }, { key: "vi", color: C.int }], false, p => `${p.t.toFixed(1)}s　積分 ${p.vi.toFixed(2)}　歩数 ${p.vs.toFixed(2)} m/s`);
+
+  // compass dial: N up, the phone-top heading as a needle, the measuring direction as a crema tick
+  const dial = $("dial"), dctx = dial.getContext("2d");
+  function drawDial() {
+    const s = dial.width, c = s / 2, r = s / 2 - 10;
+    dctx.clearRect(0, 0, s, s);
+    dctx.strokeStyle = C.line; dctx.lineWidth = 3; dctx.beginPath(); dctx.arc(c, c, r, 0, Math.PI * 2); dctx.stroke();
+    dctx.fillStyle = C.steam; dctx.font = `bold 18px ${C.mono}`; dctx.textAlign = "center"; dctx.textBaseline = "middle";
+    dctx.fillText("N", c, 14);
+    const ray = (deg, len, color, w) => { const a = deg * D2R; dctx.strokeStyle = color; dctx.lineWidth = w; dctx.lineCap = "round"; dctx.beginPath(); dctx.moveTo(c, c); dctx.lineTo(c + Math.sin(a) * len, c - Math.cos(a) * len); dctx.stroke(); };
+    if (dirMode !== "device" && heading != null) ray(dirMode === "start" ? startHeading : +dirMode, r, C.crema, 5);
+    if (heading != null) ray(heading, r - 8, C.milk, 3);
+    dctx.fillStyle = C.milk; dctx.beginPath(); dctx.arc(c, c, 4, 0, Math.PI * 2); dctx.fill();
   }
 
+  const f2 = v => v == null ? "—" : v.toFixed(2);
   function render() {
-    $("vInt").innerHTML = `${M.vf.toFixed(2)}<small>m/s</small>`;
-    $("dInt").textContent = `距離 ${M.xf.toFixed(2)} m・${(M.vf * 3.6).toFixed(1)} km/h`;
-    $("vStep").innerHTML = `${M.stepSpeed.toFixed(2)}<small>m/s</small>`;
-    $("dStep").textContent = `距離 ${(M.steps * stride()).toFixed(2)} m・${M.steps}歩`;
-    $("rF").textContent = (cur.af - (phase === "run" ? bias.f : 0)).toFixed(2);
-    $("rR").textContent = (cur.ar - (phase === "run" ? bias.r : 0)).toFixed(2);
+    $("vAcc").textContent = cur.aShow.toFixed(2);
+    $("dAcc").textContent = `最大 ${M.aMax.toFixed(2)}`;
+    $("vInt").textContent = M.vf.toFixed(2);
+    $("dInt").textContent = `${M.xf.toFixed(2)} m`;
+    $("vStep").textContent = M.stepSpeed.toFixed(2);
+    $("dStep").textContent = `${(M.steps * stride()).toFixed(2)} m・${M.steps}歩`;
+    if (heading != null) {
+      $("hdg").textContent = `${dirName(heading)} ${Math.round(heading)}°`;
+      $("hdgNote").textContent = dirMode === "device" ? "白い針：スマホの上側が向いている方角" : `白い針：スマホの向き　金の線：測る方向（${dirLabel()}）`;
+    } else if (sensorsOn) { $("hdg").textContent = "方角 —"; $("hdgNote").textContent = "この端末では方角を取れません。「スマホの上側」で測れます"; }
+    const run = phase === "run";
+    $("rE").textContent = f2(cur.ae == null ? null : cur.ae - (run ? bias.e : 0));
+    $("rN").textContent = f2(cur.an == null ? null : cur.an - (run ? bias.n : 0));
     $("rU").textContent = cur.au.toFixed(2);
+    $("rF").textContent = (cur.af - (run ? bias.f : 0)).toFixed(2);
+    $("rR").textContent = (cur.ar - (run ? bias.r : 0)).toFixed(2);
     $("rVr").textContent = M.vr.toFixed(2);
     $("rSrc").textContent = lastT ? (useOS ? "OSが除去" : "自前で推定") : "—";
+    $("rOri").textContent = oriKind || "—";
     $("rHz").textContent = hzEMA ? `${Math.round(hzEMA)} Hz` : "—";
-    drawChart();
+    drawAcc(); drawVel(); drawDial();
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
