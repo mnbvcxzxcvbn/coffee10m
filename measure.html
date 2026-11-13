@@ -304,7 +304,7 @@ td:first-child{font-family:var(--body)}
   cv.addEventListener("pointermove", e => { const r = cv.getBoundingClientRect(); hoverX = e.clientX - r.left; });
   cv.addEventListener("pointerleave", () => { hoverX = null; tip.hidden = true; });
 
-  function niceMax(v) { const steps = [1, 2, 4, 8, 12, 16, 24];   // divisible into 4 even gridlines for (const s of steps) if (v <= s) return s; return Math.ceil(v / 10) * 10; }
+  function niceMax(v) { const steps = [1, 2, 4, 8, 12, 16, 24]; /* divisible into 4 even gridlines */ for (const s of steps) if (v <= s) return s; return Math.ceil(v / 10) * 10; }
 
   function drawChart() {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
