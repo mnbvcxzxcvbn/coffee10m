@@ -69,6 +69,12 @@ button:disabled{opacity:.45;cursor:default}
 .seg input:checked+label{border-color:var(--crema);color:var(--crema)}
 .seg input:disabled+label{opacity:.4;cursor:default}
 .seg input:focus-visible+label{outline:2px solid var(--milk);outline-offset:2px}
+.toggles{display:flex;flex-direction:column;gap:6px}
+.tg{display:flex;align-items:center;gap:10px;background:var(--bean);border-radius:10px;padding:9px 12px;cursor:pointer;border:1.5px solid transparent}
+.tg input{width:20px;height:20px;accent-color:var(--crema);flex:none;margin:0}
+.tg b{font-family:var(--mono);color:var(--crema);margin-right:6px}
+.tg:has(input:checked){border-color:var(--crema)}
+.tg:has(input:focus-visible){outline:2px solid var(--milk);outline-offset:2px}
 .result{background:var(--bean);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
 .result h2{font-family:var(--display);font-weight:400;font-size:20px;margin:0}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
@@ -95,6 +101,14 @@ td:first-child{font-family:var(--body)}
       <input type="radio" name="dir" id="dStart" value="start"><label for="dStart">スタート時<br>の方角</label>
       <input type="radio" name="dir" id="dN" value="0"><label for="dN">北</label>
       <input type="radio" name="dir" id="dE" value="90"><label for="dE">東</label>
+    </div>
+  </div>
+
+  <div class="field"><span>積分のずれの補正（組み合わせ可・途中でも切り替え可）</span>
+    <div class="toggles">
+      <label class="tg"><input type="checkbox" id="optA"><span><b>A</b>一定ペースの間は加速度の平均を0とみなし、ずれを差し引く</span></label>
+      <label class="tg"><input type="checkbox" id="optB"><span><b>B</b>歩くリズムの速度へ少しずつ引き戻す</span></label>
+      <label class="tg"><input type="checkbox" id="optC"><span><b>C</b>止まったら速度を0に戻し、ずれを学習する</span></label>
     </div>
   </div>
 
@@ -133,7 +147,7 @@ td:first-child{font-family:var(--body)}
   <div class="chart">
     <div class="legend">
       <span><b>速度</b></span>
-      <span><i class="sw" style="background:var(--sInt)"></i>加速度の積分</span>
+      <span><i class="sw" style="background:var(--sInt)"></i><span id="intLegend">加速度の積分（補正なし）</span></span>
       <span><i class="sw" style="background:var(--sStep)"></i>歩くリズム</span>
       <span>縦軸 m/s</span>
     </div>
@@ -175,6 +189,9 @@ td:first-child{font-family:var(--body)}
     <div><div class="k">重力の除去</div><div class="v" id="rSrc">—</div></div>
     <div><div class="k">方角センサー</div><div class="v" id="rOri">—</div></div>
     <div><div class="k">センサー周期</div><div class="v" id="rHz">—</div></div>
+    <div><div class="k">いまの状態</div><div class="v" id="rState">—</div></div>
+    <div><div class="k">A のずれ推定</div><div class="v" id="rBA">0.000</div></div>
+    <div><div class="k">C のずれ学習</div><div class="v" id="rBC">0.000</div></div>
   </div>
 
   <ol class="how">
@@ -214,6 +231,46 @@ td:first-child{font-family:var(--body)}
   const hist = [];                     // {t, a, vi, vs}
   let lastHist = 0;
   const stride = () => +document.querySelector("input[name=st]:checked").value;
+
+  // ---- drift corrections ----
+  // A: while the step rhythm is steady, true acceleration averages 0 → its running mean is the drift.
+  // B: pull the integrated speed toward the step-rhythm speed (time constant 2 s).
+  // C: when standing still, speed is truly 0 → snap to 0 and learn the drift from how far it had wandered.
+  // biasA = mean acceleration over every steady-pace stretch so far (a long average cancels the step-by-step sway)
+  // It is collected one whole step at a time, so each sample spans exactly one sway cycle.
+  let biasA = 0, sumA = 0, sumT = 0, chunkA = 0, chunkT = 0, chunkOK = false, motionEMA = 0, stillFor = 0, ints = [], moveState = "—";
+  function makeInt(getOpts) {
+    return {
+      v: 0, x: 0, vRaw: 0, xRaw: 0, segT: 0, biasC: 0, wasStill: true,
+      reset() { Object.assign(this, { v: 0, x: 0, vRaw: 0, xRaw: 0, segT: 0, biasC: 0, wasStill: true }); },
+      update(a, dt, s) {
+        const o = getOpts();
+        const bA = o.A ? biasA : 0;
+        // A models the drift as constant since this walk began: v = vRaw − bA·T, x = xRaw − bA·T²/2.
+        // So a better estimate also repairs the speed and distance already summed.
+        if (!s.still) this.segT += dt;
+        this.vRaw += (a - (o.C ? this.biasC : 0)) * dt;
+        this.xRaw += this.vRaw * dt;
+        if (o.B) this.vRaw += 0.5 * (s.vs - (this.vRaw - bA * this.segT)) * dt;
+        if (s.still && !this.wasStill) {                       // a walk just ended: bake A in, then C
+          this.vRaw -= bA * this.segT; this.xRaw -= bA * this.segT * this.segT / 2; this.segT = 0;
+          if (o.C && s.moveT > 2) this.biasC += 0.8 * this.vRaw / s.moveT;   // true speed is 0 now: what's left is drift
+        }
+        if (o.C && s.still) this.vRaw = 0;
+        this.wasStill = s.still;
+        this.v = this.vRaw - bA * this.segT;
+        this.x = this.xRaw - bA * this.segT * this.segT / 2;
+      },
+    };
+  }
+  let moveT = 0;
+  const opts = () => ({ A: $("optA").checked, B: $("optB").checked, C: $("optC").checked });
+  const comboLabel = () => { const o = opts(); const s = ["A", "B", "C"].filter(k => o[k]).join("+"); return s || "補正なし"; };
+  // run every variant side by side so one walk compares them all; the last one follows the switches
+  const integ = [
+    makeInt(() => ({})), makeInt(() => ({ A: true })), makeInt(() => ({ B: true })), makeInt(() => ({ C: true })), makeInt(opts),
+  ];
+  const cadenceSteady = () => ints.length >= 3 && Math.max(...ints) / Math.min(...ints) < 1.35;
 
   // ---- orientation (compass) ----
   // Rotation matrix from the W3C DeviceOrientation spec: earth = R · device, earth axes x=East, y=North, z=Up.
@@ -285,11 +342,9 @@ td:first-child{font-family:var(--body)}
     cur.aShow = cur.aShow * 0.8 + aDir * 0.2;                  // lightly smoothed for reading
     if (phase !== "run" || dt === 0) return;
 
-    // 1) plain integration: v = ∫a dt, x = ∫v dt
-    M.vf += aDir * dt; M.vr += aSide * dt; M.xf += M.vf * dt;
     M.aMax = Math.max(M.aMax, Math.abs(cur.aShow));
 
-    // 2) step rhythm: stride / step interval
+    // step rhythm: stride / step interval
     lp = lp * 0.6 + au * 0.4;
     if (!stepHigh && lp > 1.1) { stepHigh = true; peak = lp; }
     if (stepHigh) {
@@ -299,13 +354,43 @@ td:first-child{font-family:var(--body)}
         if (peak < 4.5 && now - M.lastStep > 300) {
           const d = M.lastStep ? now - M.lastStep : 0;
           M.lastStep = now; M.steps++;
-          if (d > 250 && d < 2000) { const inst = stride() / (d / 1000); M.stepSpeed = M.stepSpeed ? M.stepSpeed * 0.5 + inst * 0.5 : inst; M.stepInt = d; }
+          if (d > 250 && d < 2000) {
+            const inst = stride() / (d / 1000); M.stepSpeed = M.stepSpeed ? M.stepSpeed * 0.5 + inst * 0.5 : inst; M.stepInt = d;
+            ints.push(d); if (ints.length > 4) ints.shift();
+            // A: one step = one sway cycle. At a steady pace its mean acceleration is the drift;
+            // a step whose mean is far off is speeding up or slowing down, so leave it out.
+            chunkOK = false;
+            if (M.steps >= 4 && cadenceSteady() && chunkT > 0.2) {
+              const m = chunkA / chunkT;
+              if (Math.abs(m - biasA) < 0.35) {
+                chunkOK = true; sumA += chunkA; sumT += chunkT;
+                if (sumT > 2.5) biasA = Math.max(-0.6, Math.min(0.6, sumA / sumT));
+              }
+            }
+          } else ints = [];
+          chunkA = 0; chunkT = 0;
         }
       }
     }
     if (now - M.lastStep > Math.max(900, M.stepInt * 1.5)) M.stepSpeed *= Math.exp(-dt * 2.5);
     if (M.stepSpeed < 0.02) M.stepSpeed = 0;
 
+    // integration v = ∫a dt, x = ∫v dt — once per variant
+    motionEMA += (Math.hypot(aDir, aSide, au) - motionEMA) * Math.min(1, dt / 0.3);
+    const quietSteps = now - M.lastStep > Math.max(1000, M.stepInt * 1.5);
+    if (quietSteps) ints = [];
+    const jolt = Math.hypot(aDir, aSide, au) > 0.8;              // any real movement ends "still" at once
+    stillFor = !jolt && quietSteps && motionEMA < 0.5 ? stillFor + dt : 0;
+    const still = stillFor > 0.4;
+    const steady = M.steps >= 4 && !quietSteps && cadenceSteady();
+    chunkA += aDir * dt; chunkT += dt;
+    const learning = steady && chunkOK;
+    const walkedFor = moveT;                                     // length of the walk that may be ending now
+    moveT = still ? 0 : moveT + dt;
+    moveState = still ? "静止" : learning ? "一定ペース" : "歩行・加減速";
+    for (const g of integ) g.update(aDir, dt, { still, vs: M.stepSpeed, moveT: walkedFor });
+    M.vr += aSide * dt;
+    M.vf = integ[4].v; M.xf = integ[4].x;
     if (now - lastHist > 50) { lastHist = now; hist.push({ t: (now - M.t0) / 1000, a: cur.aShow, vi: M.vf, vs: M.stepSpeed }); }
   }
 
@@ -345,6 +430,7 @@ td:first-child{font-family:var(--body)}
     }
     Object.assign(M, { vf: 0, vr: 0, xf: 0, steps: 0, stepSpeed: 0, stepInt: 0, lastStep: 0, aMax: 0 });
     hist.length = 0; lp = 0; stepHigh = false; calib = []; cur.aShow = 0;
+    integ.forEach(g => g.reset()); biasA = 0; sumA = 0; sumT = 0; chunkA = 0; chunkT = 0; chunkOK = false; moveT = 0; motionEMA = 0; stillFor = 0; ints = []; moveState = "—";
     $("result").hidden = true;
     phase = "calib";
     $("status").textContent = "静止して測っています…（2秒）";
@@ -376,7 +462,8 @@ td:first-child{font-family:var(--body)}
     }, 2000);
   });
 
-  $("btnZero").addEventListener("click", () => { M.vf = 0; M.vr = 0; });
+  $("btnZero").addEventListener("click", () => { integ.forEach(g => { g.vRaw = 0; g.segT = 0; g.v = 0; }); M.vf = 0; M.vr = 0; });
+  ["optA", "optB", "optC"].forEach(id => $(id).addEventListener("change", () => { $("intLegend").textContent = `加速度の積分（${comboLabel()}）`; }));
 
   $("btnStop").addEventListener("click", () => {
     if (phase !== "run") return;
@@ -384,7 +471,14 @@ td:first-child{font-family:var(--body)}
     dirInputs.forEach(i => i.disabled = false);
     $("btnStop").disabled = true; $("btnZero").disabled = true;
     const t = (performance.now() - M.t0) / 1000;
-    const rows = [["加速度の積分", M.xf, M.vf], ["歩くリズム", M.steps * stride(), M.stepSpeed]];
+    const rows = [
+      ["積分・補正なし", integ[0].x, integ[0].v],
+      ["積分・A", integ[1].x, integ[1].v],
+      ["積分・B", integ[2].x, integ[2].v],
+      ["積分・C", integ[3].x, integ[3].v],
+      [`積分・選択中（${comboLabel()}）`, integ[4].x, integ[4].v],
+      ["歩くリズム", M.steps * stride(), M.stepSpeed],
+    ];
     $("resBody").innerHTML = rows.map(([n, d, v]) => {
       const err = d - 10;
       return `<tr><td>${n}</td><td>${d.toFixed(2)} m</td><td>${err >= 0 ? "+" : ""}${err.toFixed(2)} m</td><td>${v.toFixed(2)} m/s</td></tr>`;
@@ -493,6 +587,9 @@ td:first-child{font-family:var(--body)}
     $("rSrc").textContent = lastT ? (useOS ? "OSが除去" : "自前で推定") : "—";
     $("rOri").textContent = oriKind || "—";
     $("rHz").textContent = hzEMA ? `${Math.round(hzEMA)} Hz` : "—";
+    $("rState").textContent = phase === "run" ? moveState : "—";
+    $("rBA").textContent = biasA.toFixed(3);
+    $("rBC").textContent = integ[4].biasC.toFixed(3);
     drawAcc(); drawVel(); drawDial();
     requestAnimationFrame(render);
   }
